@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stick N' Duel</title>
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div id="auth-overlay">
+        <div class="auth-box">
+            <h1 class="neon-text">STICK N' DUEL</h1>
+            <div id="auth-error" style="color:red; display:none; margin-bottom:10px;"></div>
+            <input id="u-in" type="text" placeholder="Username (5-12 chars)" class="pixel-input full-width">
+            <input id="p-in" type="password" placeholder="Password (5-12 chars)" class="pixel-input full-width" style="margin-top:10px;">
+            <button id="login-btn" onclick="auth()" class="pixel-btn full-width" style="margin-top:20px;">LOGIN</button>
+            <div onclick="toggleAuth()" id="auth-toggle" style="margin-top:15px; cursor:pointer; color:#888; text-decoration:underline;">New? Create Account</div>
+        </div>
+    </div>
+
+    <div class="sidebar">
+        <div class="sidebar-head">PLAYERS ONLINE</div>
+        <div id="p-list"></div>
+    </div>
+
+    <div class="stage">
+        <div class="top-bar">
+            <span id="sc-l" style="color:#00bfff">0</span>
+            <span id="pot" style="color:#ffd700">POT: $0</span>
+            <span id="sc-r" style="color:#ff4444">0</span>
+        </div>
+
+        <div class="game-area">
+            <div class="visual-center">
+                <div id="v-coin" class="vis-box" style="display:none;">
+                    <div class="coin-3d"><div class="face front">H</div><div class="face back">T</div></div>
+                </div>
+                <div id="v-dice" class="vis-box" style="display:none; font-size:40px;">
+                    <span id="dl">0 0 0</span> VS <span id="dr">0 0 0</span>
+                </div>
+                <div id="v-wheel" class="vis-box" style="display:none; font-size:40px; color:#ff00ff;">
+                    <span id="wl">0 0 0</span> VS <span id="wr">0 0 0</span>
+                </div>
+                <div id="v-res" class="vis-box" style="font-size:60px; display:none;">RESULT</div>
+                <button id="act-btn" class="action-btn" onclick="doAction()">ROLL!</button>
+            </div>
+
+            <div class="seats-row">
+                <div id="seat-left" class="seat"></div>
+                <div id="seat-right" class="seat"></div>
+            </div>
+
+            <div id="spec-bet" class="spec-panel" style="display:none;">
+                <span>BET ON WINNER:</span>
+                <input id="sp-amt" type="number" class="pixel-input" style="width:60px;" placeholder="$">
+                <button onclick="spec('left')" style="background:#00bfff; border:none; color:black; cursor:pointer; font-family:'VT323'">LEFT</button>
+                <button onclick="spec('right')" style="background:#ff4444; border:none; color:black; cursor:pointer; font-family:'VT323'">RIGHT</button>
+            </div>
+        </div>
+
+        <div class="chat-area">
+            <div id="chat-msgs" class="chat-msgs"></div>
+            <input id="chat-in" class="chat-input" placeholder="Chat here..." onkeypress="sendChat(event)">
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

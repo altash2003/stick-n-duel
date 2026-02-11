@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Admin - Stick N' Duel</title>
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+    <style>
+        body { background: #111; color: #0f0; font-family: 'VT323', monospace; padding: 20px; }
+        h1 { border-bottom: 2px solid #0f0; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #333; padding: 10px; text-align: left; color: #fff; }
+        th { color: #0f0; }
+        button { background: #000; color: #0f0; border: 1px solid #0f0; padding: 5px; cursor: pointer; margin-right:5px; font-family:inherit; font-size:16px; }
+        button:hover { background: #0f0; color: #000; }
+        button.danger { border-color: red; color: red; }
+        button.danger:hover { background: red; color: white; }
+        input { background: #222; border: 1px solid #555; color: #fff; padding: 5px; font-family:inherit; }
+    </style>
+</head>
+<body>
+    <h1>ADMIN DASHBOARD</h1>
+    <button onclick="loadUsers()">REFRESH DATA</button>
+    <a href="/" style="color:#fff; margin-left:20px;">BACK TO GAME</a>
+    
+    <table>
+        <thead>
+            <tr><th>Username</th><th>Balance</th><th>Role</th><th>Status</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="list"></tbody>
+    </table>
+
+    <script>
+        async function loadUsers() {
+            const res = await fetch('/api/admin/users');
+            if(res.status === 401 || res.status === 403) return alert("ACCESS DENIED");
+            const users = await res.json();
+            document.getElementById('list').innerHTML = users.map(u => `
+                <tr>
+                    <td>${u.username}</td>
+                    <td>$${u.balance}</td>
+                    <td>${u.role}</td>
+                    <td style="color:${u.banned?'red':'green'}">${u.banned?'BANNED':'ACTIVE'}</td>
+                    <td>
+                        <input type="number" id="amt-${u._id}" placeholder="$$$" style="width:70px">
+                        <button onclick="transact('${u._id}', 'DEPOSIT')">TOP-UP</button>
+                        <button onclick="transact('${u._id}', 'WITHDRAW')">WITHDRAW</button>
+                        <button class="danger" onclick="ban('${u._id}', ${!u.banned})">${u.banned?'UNBAN':'BAN'}</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        async function transact(userId, type) {
+            const amount = document.getElementById(`amt-${userId}`).value;
+            if(!amount) return alert("Enter amount");
+            await fetch('/api/admin/transaction', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ userId, type, amount })
+            });
+            loadUsers();
+        }
+
+        async function ban(userId, ban) {
+            if(!confirm("Confirm action?")) return;
+            await fetch('/api/admin/ban', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ userId, ban })
+            });
+            loadUsers();
+        }
+
+        loadUsers();
+    </script>
+</body>
+</html>
