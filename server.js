@@ -1,9 +1,9 @@
  (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
 diff --git a/server.js b/server.js
-index 7d5c1d9ad061d75e82738c766c012104546a82ed..8ed1802f3a177124b5cd17454b6d68a2487f60ad 100644
+index 7d5c1d9ad061d75e82738c766c012104546a82ed..adbe8cadda8e2823daad0b1b9fee4681cb3d0b4a 100644
 --- a/server.js
 +++ b/server.js
-@@ -1,379 +1,401 @@
+@@ -1,379 +1,412 @@
 -require('dotenv').config();
 -const express = require('express');
 -const http = require('http');
@@ -405,14 +405,25 @@ index 7d5c1d9ad061d75e82738c766c012104546a82ed..8ed1802f3a177124b5cd17454b6d68a2
 +app.use(cors());
 +
 +// --- MONGODB CONNECTION ---
-+// Accept both common env names used by hosting providers.
-+const mongoUri = process.env.MONGO_URL || process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/sticknduel';
++// Accept common env names used by different hosts (including Railway setups).
++const mongoUri =
++    process.env.MONGO_URL ||
++    process.env.MONGODB_URI ||
++    process.env.MONGO_PRIVATE_URL ||
++    process.env.DATABASE_URL;
++
++if (!mongoUri) {
++    console.error('❌ MongoDB configuration missing.');
++    console.error('ℹ️  On Railway, make sure this service has a reference variable to your Mongo service (ex: MONGO_URL).');
++    process.exit(1);
++}
++
 +mongoose.set('bufferCommands', false);
 +mongoose.connect(mongoUri, { serverSelectionTimeoutMS: 5000 })
 +    .then(() => console.log('✅ Connected to MongoDB'))
 +    .catch(err => {
 +        console.error('❌ MongoDB Error:', err.message);
-+        console.error('ℹ️  Set MONGO_URL (or MONGODB_URI) to a reachable MongoDB connection string.');
++        console.error('ℹ️  Check that your Railway Mongo variables are correctly wired to this service.');
 +    });
 +
 +// --- SCHEMAS ---
@@ -497,7 +508,7 @@ index 7d5c1d9ad061d75e82738c766c012104546a82ed..8ed1802f3a177124b5cd17454b6d68a2
 +    } catch (err) {
 +        console.error('Register error:', err.message);
 +        if (isDatabaseUnavailableError(err)) {
-+            return res.status(503).json({ error: "Database unavailable. Check MONGO_URL/MONGODB_URI." });
++            return res.status(503).json({ error: "Database unavailable. Check Mongo env vars (MONGO_URL/MONGODB_URI)." });
 +        }
 +        res.status(500).json({ error: "Server error" });
 +    }
@@ -521,7 +532,7 @@ index 7d5c1d9ad061d75e82738c766c012104546a82ed..8ed1802f3a177124b5cd17454b6d68a2
 +    } catch (err) {
 +        console.error('Login error:', err.message);
 +        if (isDatabaseUnavailableError(err)) {
-+            return res.status(503).json({ error: "Database unavailable. Check MONGO_URL/MONGODB_URI." });
++            return res.status(503).json({ error: "Database unavailable. Check Mongo env vars (MONGO_URL/MONGODB_URI)." });
 +        }
 +        res.status(500).json({ error: "Server error" });
 +    }
