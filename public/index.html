@@ -1,79 +1,413 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stick N' Duel</title>
-    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
-</head>
-<body>
+<script src="/socket.io/socket.io.js"></script>
 
-    <div id="auth-overlay">
-        <div class="auth-box">
-            <h1 class="neon-text">STICK N' DUEL</h1>
-            <div id="auth-error" style="color:red; display:none; margin-bottom:10px;"></div>
-            <input id="u-in" type="text" placeholder="Username (5-12 chars)" class="pixel-input full-width">
-            <input id="p-in" type="password" placeholder="Password (5-12 chars)" class="pixel-input full-width" style="margin-top:10px;">
-            <button id="login-btn" onclick="auth()" class="pixel-btn full-width" style="margin-top:20px;">LOGIN</button>
-            <div onclick="toggleAuth()" id="auth-toggle" style="margin-top:15px; cursor:pointer; color:#888; text-decoration:underline;">New? Create Account</div>
-        </div>
-    </div>
+<script>
+    const socket = io();
+    let myPlayerId = null;
+    let roomID = null;
 
-    <div class="sidebar">
-        <div class="sidebar-head">PLAYERS ONLINE</div>
-        <div id="p-list">
-            </div>
-    </div>
+    // --- NETWORK HANDLERS ---
+    
+    socket.on('status', (msg) => {
+        updateStatus(msg);
+    });
 
-    <div class="stage">
-        <div class="top-bar">
-            <span id="sc-l" style="color:#00bfff">0</span>
-            <span id="pot" style="color:#ffd700">POT: $0</span>
-            <span id="sc-r" style="color:#ff4444">0</span>
-        </div>
+    socket.on('init', (data) => {
+        myPlayerId = data.player;
+        roomID = data.room;
+        
+        // Setup initial view
+        document.getElementById('p1Panel').querySelector('.player-header').innerText = (myPlayerId === 1) ? "YOU (P1)" : "PLAYER 1";
+        document.getElementById('p2Panel').querySelector('.player-header').innerText = (myPlayerId === 2) ? "YOU (P2)" : "PLAYER 2";
+        
+        resetMatch(false); // Reset but don't broadcast yet
+    });
 
-        <div class="game-area">
+    // Receive opponent's move
+    socket.on('remoteAction', (data) => {
+        if(data.type === 'dice') runDice(data.p, data.result);
+        if(data.type === 'coin') runCoin(data.p, data.call, data.isHeads);
+        if(data.type === 'hl')   runHL(data.p, data.guess, data.nextCard);
+        if(data.type === 'roulette') runR(data.p, data.call, data.angle);
+        if(data.type === 'rpsLock') remoteRPSLock(data.p);
+        if(data.type === 'rpsReveal') remoteRPSReveal(data.p1Choice, data.p2Choice);
+        if(data.type === 'ttt') cTTT(data.index, true); // true = remote
+        if(data.type === 'setGame') setGame(data.game, true);
+        if(data.type === 'reset') resetMatch(false);
+    });
+
+    // --- GAME LOGIC ---
+
+    const state = { game: null, turn: 1, p1Score: 0, p2Score: 0, targetScore: 1, tempData: {}, isGameOver: false, isBusy: false };
+    const DOM = {
+        p1Panel: document.getElementById('p1Panel'), p2Panel: document.getElementById('p2Panel'),
+        p1Ctrls: document.getElementById('p1Controls'), p2Ctrls: document.getElementById('p2Controls'),
+        p1Score: document.getElementById('p1Score'), p2Score: document.getElementById('p2Score'),
+        status: document.getElementById('status'), visuals: document.getElementById('gameVisuals'),
+        target: document.getElementById('targetDisplay'), round: document.getElementById('roundTracker')
+    };
+
+    // Modified to broadcast reset
+    function resetMatch(broadcast = true) {
+        if(broadcast && roomID) socket.emit('gameAction', { room: roomID, type: 'reset' });
+
+        state.p1Score = 0; state.p2Score = 0; state.turn = 1; state.isGameOver = false; state.isBusy = false; state.tempData = {}; 
+        state.targetScore = parseInt(document.getElementById('roundMode').value); 
+        DOM.target.innerText = `TARGET: ${state.targetScore}`;
+        document.querySelectorAll('.game-tab').forEach(t => t.classList.remove('disabled'));
+        updateUI(); 
+        
+        // Only P1 sets the initial game to avoid race conditions, or default to dice
+        setGame('dice', false); 
+    }
+
+    function setGame(type, isRemote = false) {
+        if(state.isGameOver || state.isBusy) return;
+        
+        // If I clicked it, tell the other player
+        if(!isRemote && roomID) {
+            socket.emit('gameAction', { room: roomID, type: 'setGame', game: type });
+        }
+
+        state.game = type; state.tempData = {};
+        document.querySelectorAll('.game-tab').forEach(t => t.classList.remove('active'));
+        const tab = document.getElementById(`tab-${type}`);
+        if(tab) tab.classList.add('active');
+        
+        DOM.visuals.innerHTML = '<div class="vs-badge">VS</div>'; 
+        DOM.p1Ctrls.innerHTML = ''; DOM.p2Ctrls.innerHTML = '';
+
+        if(type === 'dice') setupDice();
+        if(type === 'coin') setupCoin();
+        if(type === 'hl') setupHighLow();
+        if(type === 'roulette') setupRoulette();
+        if(type === 'rps') setupRPS();
+        if(type === 'ttt') setupTTT();
+
+        updateStatus(`${type.toUpperCase()} SELECTED. P1 TURN.`);
+        updateTurn(1);
+    }
+
+    function setBusy(busy) {
+        state.isBusy = busy;
+        const tabs = document.querySelectorAll('.game-tab');
+        tabs.forEach(t => {
+            if(busy) t.classList.add('disabled');
+            else t.classList.remove('disabled');
+        });
+    }
+
+    function updateTurn(p) {
+        if(state.isGameOver) { toggleButtons(1, false); toggleButtons(2, false); return; }
+        state.turn = p;
+        
+        // Visuals
+        if(p === 1) { 
+            DOM.p1Panel.classList.add('active-turn'); DOM.p2Panel.classList.remove('active-turn'); 
+        } else { 
+            DOM.p1Panel.classList.remove('active-turn'); DOM.p2Panel.classList.add('active-turn'); 
+        }
+
+        // CONTROL LOGIC: Only enable buttons if it is YOUR turn and YOU are that player
+        const isMyTurn = (myPlayerId === p);
+        toggleButtons(1, isMyTurn && p === 1);
+        toggleButtons(2, isMyTurn && p === 2);
+    }
+
+    function toggleButtons(p, en) {
+        const c = p === 1 ? DOM.p1Ctrls : DOM.p2Ctrls; 
+        c.querySelectorAll('button').forEach(b => b.disabled = !en);
+    }
+
+    function awardPoint(p) {
+        if(state.isGameOver) return;
+        if(p === 1) state.p1Score++; else state.p2Score++;
+        updateUI(p);
+        setTimeout(checkMatchWin, 500);
+    }
+
+    function updateUI(winner) {
+        DOM.p1Score.innerText = state.p1Score; DOM.p2Score.innerText = state.p2Score;
+        DOM.round.innerHTML = `ROUND <span>${state.p1Score + state.p2Score + 1}</span>`;
+        document.getElementById('p1MatchPoint').style.display = (state.p1Score === state.targetScore - 1) ? 'block' : 'none';
+        document.getElementById('p2MatchPoint').style.display = (state.p2Score === state.targetScore - 1) ? 'block' : 'none';
+        if(winner) { 
+            const el = winner === 1 ? DOM.p1Score : DOM.p2Score; 
+            el.classList.add('score-pulse'); setTimeout(() => el.classList.remove('score-pulse'), 500); 
+        }
+    }
+
+    function updateStatus(msg) { DOM.status.innerText = msg; }
+
+    function checkMatchWin() {
+        if(state.p1Score >= state.targetScore) endGame(1);
+        else if(state.p2Score >= state.targetScore) endGame(2);
+    }
+
+    function endGame(winner) {
+        state.isGameOver = true;
+        setBusy(false);
+        toggleButtons(1, false); toggleButtons(2, false);
+        DOM.p1Panel.classList.remove('active-turn'); DOM.p2Panel.classList.remove('active-turn');
+        DOM.round.innerHTML = "MATCH OVER"; 
+        
+        DOM.visuals.innerHTML = `
+            <div style="text-align:center; z-index:10; background:#000; padding:20px;">
+                <div style="color:var(--accent); margin-bottom:10px;">MATCH COMPLETE!</div>
+                <h1 style="color:${winner===1?'var(--p1-color)':'var(--p2-color)'}; font-size:40px; margin-bottom:20px;">PLAYER ${winner}<br>WINS!</h1>
+                <button class="reset-btn" onclick="resetMatch()" style="font-size:16px; padding:15px; width:100%;">PLAY AGAIN</button>
+            </div>`;
+        updateStatus("WINNER DECLARED!");
+    }
+
+    function createBtn(p, txt, fn, fontSize) { 
+        const b = document.createElement('button'); 
+        b.className = `arcade-btn p${p}-btn`; 
+        b.innerText = txt; 
+        b.onclick = fn; 
+        if(fontSize) b.style.fontSize = fontSize;
+        if(p === 1) DOM.p1Ctrls.appendChild(b); else DOM.p2Ctrls.appendChild(b); 
+        // Default disabled until turn update
+        b.disabled = true;
+    }
+
+    /* --- 1. DICE --- */
+    function setupDice() {
+        createBtn(1,"ROLL",()=>initDice(1)); createBtn(2,"ROLL",()=>initDice(2));
+        DOM.visuals.innerHTML+=`<div style="display:flex; flex-direction:column; gap:30px; align-items:center;"><div id="p1Dice" class="dice-row" style="opacity:0.5"></div><div id="p2Dice" class="dice-row" style="opacity:0.5"></div></div>`;
+        renderDice('p1Dice',[1,1,1]); renderDice('p2Dice',[1,1,1]);
+    }
+    function renderDice(id,v){ const el=document.getElementById(id); el.innerHTML=''; v.forEach(x=>el.innerHTML+=`<div class="die" v="${x}"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>`); }
+    
+    // Triggered by Button Click (Sender)
+    function initDice(p) {
+        const result = [r6(), r6(), r6()];
+        socket.emit('gameAction', { room: roomID, type: 'dice', p: p, result: result });
+        runDice(p, result);
+    }
+    // Runs on BOTH screens
+    function runDice(p, r) {
+        setBusy(true); 
+        toggleButtons(p, false); 
+        const t = r.reduce((a,b)=>a+b,0);
+        const row = document.getElementById(p===1?'p1Dice':'p2Dice');
+        row.childNodes.forEach(d=>d.classList.add('shaking'));
+        setTimeout(()=>{
+            row.childNodes.forEach(d=>d.classList.remove('shaking'));
+            if(p===1) {
+                state.tempData.p1Roll=t; renderDice('p1Dice',r); row.style.opacity=1;
+                updateStatus(`P1 ROLLED ${t}. P2 TURN.`); 
+                setBusy(false); 
+                updateTurn(2);
+            } else {
+                state.tempData.p2Roll=t; renderDice('p2Dice',r); row.style.opacity=1;
+                let p1=state.tempData.p1Roll;
+                updateStatus(`P1: ${p1}  VS  P2: ${t}`);
+                setTimeout(() => {
+                    if(p1>t){ updateStatus(`P1 WINS ROUND!`); awardPoint(1); }
+                    else if(t>p1){ updateStatus(`P2 WINS ROUND!`); awardPoint(2); }
+                    else updateStatus("DRAW! ROLL AGAIN.");
+                    setTimeout(()=>{ 
+                        document.getElementById('p1Dice').style.opacity=0.5; 
+                        document.getElementById('p2Dice').style.opacity=0.5; 
+                        setBusy(false); 
+                        updateTurn(1); 
+                    }, 2000);
+                }, 2000); 
+            }
+        }, 600);
+    }
+    function r6(){return Math.ceil(Math.random()*6)}
+
+    /* --- 2. COIN --- */
+    function setupCoin() {
+        createBtn(1,"HEADS",()=>initCoin(1,'H')); createBtn(1,"TAILS",()=>initCoin(1,'T'));
+        createBtn(2,"HEADS",()=>initCoin(2,'H')); createBtn(2,"TAILS",()=>initCoin(2,'T'));
+        DOM.visuals.innerHTML = `<div class="coin-container"><div class="coin" id="coinEl"><div class="coin-face coin-front">H</div><div class="coin-face coin-back">T</div></div></div>`;
+        state.coinRot = 0;
+    }
+    function initCoin(p, call) {
+        const isHeads = Math.random() < 0.5;
+        socket.emit('gameAction', { room: roomID, type: 'coin', p: p, call: call, isHeads: isHeads });
+        runCoin(p, call, isHeads);
+    }
+    function runCoin(p, call, isHeads) {
+        setBusy(true); toggleButtons(p, false);
+        const el = document.getElementById('coinEl');
+        const res = isHeads ? 'H' : 'T';
+        const minSpins = 5;
+        const currentRot = state.coinRot;
+        let target = Math.ceil((currentRot + (minSpins * 360)) / 360) * 360;
+        if(!isHeads) target += 180; 
+        state.coinRot = target; 
+        el.style.transform = `rotateY(${target}deg)`;
+        setTimeout(() => {
+            if(call === res) { updateStatus(`P${p} CORRECT!`); awardPoint(p); }
+            else updateStatus(`P${p} WRONG.`);
+            setTimeout(() => { setBusy(false); updateTurn(p===1?2:1); }, 2000);
+        }, 2500);
+    }
+
+    /* --- 3. HI-LO --- */
+    function setupHighLow() {
+        // Only host generates initial card
+        if(!state.tempData.curr) state.tempData.curr=r13(); 
+        createBtn(1,"HIGHER",()=>initHL(1,'high')); createBtn(1,"LOWER",()=>initHL(1,'low'));
+        createBtn(2,"HIGHER",()=>initHL(2,'high')); createBtn(2,"LOWER",()=>initHL(2,'low'));
+        drawHL();
+    }
+    function r13(){return Math.ceil(Math.random()*13)}
+    function cN(v){return v==11?'J':v==12?'Q':v==13?'K':v==1?'A':v}
+    function drawHL(){ DOM.visuals.innerHTML=`<div class="vs-badge">VS</div><div class="hl-card-wrap" id="hlWrap"><div class="hl-card-inner"><div class="hl-card-front"><div class="hl-label">CURRENT</div>${cN(state.tempData.curr)}</div><div class="hl-card-back">RETRO</div></div></div>`; }
+    
+    function initHL(p, guess) {
+        const nextCard = r13();
+        socket.emit('gameAction', { room: roomID, type: 'hl', p: p, guess: guess, nextCard: nextCard });
+        runHL(p, guess, nextCard);
+    }
+    function runHL(p, g, next){
+        setBusy(true); toggleButtons(p, false);
+        document.getElementById('hlWrap').classList.add('flipped');
+        setTimeout(()=>{
+            let curr=state.tempData.curr;
+            let win=(next>curr&&g=='high')||(next<curr&&g=='low');
+            state.tempData.curr=next;
+            document.getElementById('hlWrap').classList.remove('flipped');
+            setTimeout(()=>{
+                drawHL();
+                setTimeout(() => {
+                    if(win){ updateStatus(`P${p} CORRECT!`); awardPoint(p); } else updateStatus(`P${p} WRONG.`);
+                    setTimeout(()=>{ setBusy(false); updateTurn(p===1?2:1); }, 2000);
+                }, 1500);
+            },300);
+        },600);
+    }
+
+    /* --- 4. ROULETTE --- */
+    function setupRoulette(){ 
+        ['RED','BLACK'].forEach(c=>{ createBtn(1,c,()=>initR(1,c)); createBtn(2,c,()=>initR(2,c)); }); 
+        DOM.visuals.innerHTML+=`<div class="wheel-container"><div class="wheel-marker"></div><div class="wheel" id="wEl"></div></div>`; 
+    }
+    let wAng=0;
+    function initR(p, call) {
+        const angle = 1080 + Math.random()*360;
+        socket.emit('gameAction', { room: roomID, type: 'roulette', p: p, call: call, angle: angle });
+        runR(p, call, angle);
+    }
+    function runR(p,c, addedAngle){
+        setBusy(true); toggleButtons(p, false);
+        wAng += addedAngle; 
+        document.getElementById('wEl').style.transform=`rotate(${wAng}deg)`;
+        setTimeout(()=>{
+            let norm = (360 - (wAng%360)) % 360;
+            let seg = Math.floor(norm / 60); 
+            let res = (seg % 2 === 0) ? 'RED' : 'BLACK';
+            if(c===res){ updateStatus(`P${p} WIN! LANDED ${res}.`); awardPoint(p); }
+            else updateStatus(`P${p} LOST. LANDED ${res}.`);
+            setTimeout(()=>{ setBusy(false); updateTurn(p===1?2:1); }, 2000);
+        }, 3100);
+    }
+
+    /* --- 5. RPS --- */
+    function setupRPS(){ 
+        const moves = [{l:'R',v:'ROCK'}, {l:'P',v:'PAPER'}, {l:'S',v:'SCISSORS'}];
+        moves.forEach(m => {
+            createBtn(1, m.v, ()=>initRPS(1, m.l), '12px'); 
+            createBtn(2, m.v, ()=>initRPS(2, m.l), '12px');
+        });
+        DOM.visuals.innerHTML+=`<div style="display:flex; gap:30px;"><div id="p1R" class="rps-card">?</div><div id="p2R" class="rps-card">?</div></div>`; 
+    }
+    function initRPS(p, choice) {
+        // Send choice to server, but keep secret for now
+        if(p === 1) {
+            state.tempData.p1 = choice;
+            socket.emit('gameAction', { room: roomID, type: 'rpsLock', p: 1 }); // Just say locked
+            lkRPS(1);
+        } else {
+            // P2 is playing, we need P1's choice to solve
+            socket.emit('gameAction', { room: roomID, type: 'rpsReveal', p1Choice: state.tempData.p1, p2Choice: choice });
+            // Wait for reveal event
+        }
+    }
+
+    function remoteRPSLock(p) {
+        if(p === 1) lkRPS(1);
+    }
+
+    function remoteRPSReveal(c1, c2) {
+        state.tempData.p1 = c1;
+        state.tempData.p2 = c2;
+        lkRPS(2); // Triggers solve
+    }
+
+    function lkRPS(p){ 
+        toggleButtons(p, false);
+        if(p===1){ 
+            document.getElementById('p1R').innerText="LOCKED"; document.getElementById('p1R').style.fontSize="14px";
+            updateStatus("P1 LOCKED"); 
+            // Only update turn if we are P1 or host logic? 
+            // For P1 local:
+            setTimeout(()=>{ setBusy(false); updateTurn(2); }, 1000);
+        }
+        else { 
+            document.getElementById('p2R').innerText="LOCKED"; document.getElementById('p2R').style.fontSize="14px";
+            solveRPS(); 
+        }
+    }
+    function solveRPS(){
+        setBusy(true);
+        const c1=document.getElementById('p1R'), c2=document.getElementById('p2R');
+        c1.classList.add('rps-anim'); c2.classList.add('rps-anim');
+        setTimeout(()=>{
+            c1.classList.remove('rps-anim'); c2.classList.remove('rps-anim');
+            let p1=state.tempData.p1, p2=state.tempData.p2;
             
-            <div class="visual-center">
-                <div id="v-coin" class="vis-box" style="display:none;">
-                    <div class="coin-3d"><div class="face front">H</div><div class="face back">T</div></div>
-                </div>
-                <div id="v-dice" class="vis-box" style="display:none; font-size:40px;">
-                    <span id="dl">0 0 0</span> VS <span id="dr">0 0 0</span>
-                </div>
-                <div id="v-wheel" class="vis-box" style="display:none; font-size:40px; color:#ff00ff;">
-                    <span id="wl">0 0 0</span> VS <span id="wr">0 0 0</span>
-                </div>
-                <div id="v-res" class="vis-box" style="font-size:60px; display:none;">RESULT</div>
-                <button id="act-btn" class="action-btn" onclick="doAction()">ROLL!</button>
-            </div>
+            const map = { 'R':'✊', 'P':'✋', 'S':'✌️' };
+            c1.innerText=map[p1]; c1.style.fontSize="60px";
+            c2.innerText=map[p2]; c2.style.fontSize="60px";
+            
+            let w=0; 
+            if(p1!=p2){ 
+                if((p1=='R'&&p2=='S')||(p1=='P'&&p2=='R')||(p1=='S'&&p2=='P')) w=1; 
+                else w=2; 
+            }
+            setTimeout(() => {
+                if(w){ updateStatus(`P${w} WINS`); awardPoint(w); } else updateStatus("DRAW");
+                setTimeout(()=>{ setBusy(false); updateTurn(1); }, 2000);
+            }, 2000);
+        }, 1500);
+    }
 
-            <div class="seats-row">
-                <div id="seat-left" class="seat"></div>
-                <div id="seat-right" class="seat"></div>
-            </div>
+    /* --- 6. TTT --- */
+    function setupTTT(){ state.tempData.bd=Array(9).fill(null); DOM.visuals.innerHTML+=`<div class="ttt-grid" id="tg"></div>`; rTTT(); updateStatus("P1 (X) START"); }
+    function rTTT(){ const g=document.getElementById('tg'); g.innerHTML=''; state.tempData.bd.forEach((c,i)=>{ let d=document.createElement('div'); d.className='ttt-cell '+(c?'filled':''); d.innerText=c||''; d.onclick=()=>initTTT(i); g.appendChild(d); }); }
+    
+    function initTTT(i) {
+         if(state.tempData.bd[i] || state.isBusy || state.turn !== myPlayerId) return;
+         socket.emit('gameAction', { room: roomID, type: 'ttt', index: i });
+         cTTT(i);
+    }
 
-            <div id="spec-bet" class="spec-panel" style="display:none;">
-                <span>BET ON WINNER:</span>
-                <input id="sp-amt" type="number" class="pixel-input" style="width:60px;" placeholder="$">
-                <button onclick="spec('left')" style="background:#00bfff; border:none; color:black; cursor:pointer; font-family:'VT323'">LEFT</button>
-                <button onclick="spec('right')" style="background:#ff4444; border:none; color:black; cursor:pointer; font-family:'VT323'">RIGHT</button>
-            </div>
-
-            <div class="chat-overlay-container">
-                <div class="chat-box">
-                    <div id="chat-msgs" class="chat-msgs"></div>
-                    <div class="chat-input-wrapper">
-                        <input id="chat-in" class="chat-input" placeholder="Type here..." onkeypress="sendChat(event)">
-                    </div>
-                </div>
-            </div>
-
-        </div>
-    </div>
-
-    <script src="/socket.io/socket.io.js"></script>
-    <script src="script.js"></script>
-</body>
-</html>
+    function cTTT(i, isRemote = false){ 
+        if(!isRemote && (state.tempData.bd[i] || state.isBusy)) return; 
+        
+        setBusy(true);
+        
+        let s=state.turn===1?'X':'O'; 
+        state.tempData.bd[i]=s; rTTT(); 
+        
+        if(kTTT(s)){ 
+            updateStatus(`P${state.turn} WINS ROUND!`); awardPoint(state.turn); 
+            setTimeout(()=>{ setBusy(false); setGame('ttt', true); },1500); 
+            return; 
+        } 
+        if(!state.tempData.bd.includes(null)){ 
+            updateStatus("DRAW! RESETTING."); 
+            setTimeout(()=>{ setBusy(false); setGame('ttt', true); },1500); 
+            return; 
+        } 
+        
+        setBusy(false);
+        updateTurn(state.turn===1?2:1); 
+    }
+    function kTTT(s){ const w=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]]; return w.some(c=>state.tempData.bd[c[0]]==s&&state.tempData.bd[c[1]]==s&&state.tempData.bd[c[2]]==s); }
+</script>
