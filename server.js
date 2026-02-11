@@ -7,9 +7,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { Server } = require("socket.io");
 const path = require('path');
-const cors = require('cors');
 
-// --- CONFIG ---
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
@@ -17,271 +15,175 @@ const io = new Server(server);
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
-app.use(cors());
 
-// --- DEBUGGING LOGS ---
-console.log("🚀 Server starting...");
-console.log("Checking MONGO_URL:", process.env.MONGO_URL ? "✅ FOUND" : "❌ MISSING (App will crash)");
+// DB CONNECTION
+mongoose.connect(process.env.MONGO_URL)
+    .then(() => console.log('✅ DB Connected'))
+    .catch(err => console.error('❌ DB Error:', err.message));
 
-// --- MONGODB CONNECTION ---
-mongoose.connect(process.env.MONGO_URL || 'mongodb://127.0.0.1:27017/sticknduel')
-    .then(() => console.log('✅ Connected to MongoDB Successfully'))
-    .catch(err => {
-        console.error('❌ FATAL MONGODB ERROR:', err.message);
-        // Do not exit process, keep alive to show logs
-    });
-
-// --- SCHEMAS ---
+// SCHEMAS
 const userSchema = new mongoose.Schema({
-    username: { 
-        type: String, 
-        required: true, 
-        unique: true, 
-        match: /^[A-Za-z0-9]+$/ 
-    },
+    username: { type: String, required: true, unique: true, match: /^[A-Za-z0-9]{5,12}$/ },
     password: { type: String, required: true },
     balance: { type: Number, default: 1000 },
-    role: { type: String, default: 'user' }, 
+    role: { type: String, default: 'user' },
     banned: { type: Boolean, default: false },
-    wins: { type: Number, default: 0 },
-    losses: { type: Number, default: 0 },
-    createdAt: { type: Date, default: Date.now }
+    color: { type: String, default: '#00ffff' }
 });
-
-const transactionSchema = new mongoose.Schema({
-    userId: mongoose.Schema.Types.ObjectId,
-    type: String, 
-    amount: Number,
-    timestamp: { type: Date, default: Date.now }
-});
-
 const User = mongoose.model('User', userSchema);
-const Transaction = mongoose.model('Transaction', transactionSchema);
 
-// --- AUTH ROUTES (With Debugging) ---
+// AUTH LOGIC
 app.post('/api/register', async (req, res) => {
-    console.log("📝 Register Request:", req.body.username);
-    
     const { username, password } = req.body;
-    
-    if (!/^[A-Za-z0-9]{5,12}$/.test(username)) {
-        console.log("❌ Validation Fail: Username format");
-        return res.status(400).json({ error: "Username: 5-12 chars, letters/numbers only." });
-    }
-    if (password.length < 5 || password.length > 12) {
-        console.log("❌ Validation Fail: Password length");
-        return res.status(400).json({ error: "Password: 5-12 chars." });
-    }
-
     try {
-        const existing = await User.findOne({ username });
-        if (existing) {
-            console.log("❌ User exists");
-            return res.status(400).json({ error: "Username taken." });
-        }
-
         const hashedPassword = await bcrypt.hash(password, 10);
         const isFirst = (await User.countDocuments({})) === 0;
-        
-        const newUser = new User({ 
-            username, 
-            password: hashedPassword, 
-            role: isFirst ? 'admin' : 'user' 
-        });
-        await newUser.save();
-        
-        console.log("✅ User Created:", username);
-        res.status(201).json({ message: "Registered successfully" });
-    } catch (err) { 
-        console.error("❌ REGISTER SERVER ERROR:", err); // CHECK RAILWAY LOGS FOR THIS
-        res.status(500).json({ error: "Database Connection Error. Check Server Logs." }); 
-    }
+        const color = ["#00ffff", "#00ff00", "#ffff00", "#ff00ff", "#ff4444"][Math.floor(Math.random()*5)];
+        await new User({ username, password: hashedPassword, role: isFirst ? 'admin' : 'user', color }).save();
+        res.status(201).json({ message: "Success" });
+    } catch (e) { res.status(400).json({ error: "Username taken or invalid" }); }
 });
 
 app.post('/api/login', async (req, res) => {
-    console.log("🔑 Login Request:", req.body.username);
     const { username, password } = req.body;
-    try {
-        const user = await User.findOne({ username });
-        if (!user) return res.status(400).json({ error: "User not found" });
-        if (user.banned) return res.status(403).json({ error: "Account Banned" });
-
-        const validPass = await bcrypt.compare(password, user.password);
-        if (!validPass) return res.status(400).json({ error: "Invalid password" });
-
-        const token = jwt.sign({ _id: user._id, role: user.role }, process.env.JWT_SECRET || 'devsecret');
-        
-        console.log("✅ Login Success:", username);
-        res.cookie('token', token, { httpOnly: true }).json({ 
-            message: "Logged in", 
-            user: { username: user.username, role: user.role, balance: user.balance }
-        });
-    } catch (err) { 
-        console.error("❌ LOGIN SERVER ERROR:", err);
-        res.status(500).json({ error: "Login System Error" }); 
-    }
+    const user = await User.findOne({ username });
+    if (!user || !(await bcrypt.compare(password, user.password))) return res.status(400).json({ error: "Invalid credentials" });
+    const token = jwt.sign({ _id: user._id, role: user.role }, process.env.JWT_SECRET || 'secret');
+    res.cookie('token', token, { httpOnly: true }).json({ user: { username: user.username, role: user.role, balance: user.balance } });
 });
 
-app.post('/api/logout', (req, res) => res.clearCookie('token').json({ message: "Logged out" }));
+// ADMIN API
+app.get('/api/admin/users', async (req, res) => {
+    const users = await User.find({}).select('-password');
+    res.json(users);
+});
+app.post('/api/admin/tx', async (req, res) => {
+    const { userId, type, amount } = req.body;
+    const val = type === 'add' ? parseInt(amount) : -parseInt(amount);
+    await User.findByIdAndUpdate(userId, { $inc: { balance: val } });
+    res.json({ success: true });
+});
 
-// --- GAME STATE & SOCKETS ---
+// GAME ENGINE
 let players = {};
-let duelState = {
-    seatLeft: null, seatRight: null,
-    gameType: 'coin', matchMode: 'bo3',
-    betAmount: 0, status: 'open',
-    leftLocked: false, rightLocked: false,
-    pot: 0, scores: { left: 0, right: 0 },
-    actions: { left: null, right: null },
-    spectatorBets: {}
+let duel = {
+    l: null, r: null, status: 'open', pot: 0, bet: 0, game: 'coin', mode: 'bo3',
+    lLock: false, rLock: false, score: { l: 0, r: 0 }, round: 0, actions: { l: false, r: false }, specBets: {}
 };
-const NEON_COLORS = ["#ff00ff", "#00ffff", "#00ff00", "#ffff00", "#ff3333"];
 
 io.on('connection', (socket) => {
-    socket.on('join_game', async ({ username }) => {
-        try {
-            const dbUser = await User.findOne({ username });
-            if(!dbUser) return;
-            
-            const color = NEON_COLORS[Math.floor(Math.random() * NEON_COLORS.length)];
-            players[socket.id] = {
-                id: socket.id,
-                dbId: dbUser._id.toString(),
-                username: dbUser.username,
-                balance: dbUser.balance,
-                color: color,
-                avatar: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${dbUser.username}`
-            };
-            
-            io.emit('chat_message', { type: 'system', text: `${username} joined.`, color: '#fff' });
-            broadcastUpdate();
-        } catch(e) { console.error("Socket Join Error:", e); }
+    socket.on('join', async (name) => {
+        const u = await User.findOne({ username: name });
+        if(!u) return;
+        players[socket.id] = { id: socket.id, dbId: u._id, name: u.username, balance: u.balance, color: u.color, role: u.role };
+        broadcast();
     });
 
-    socket.on('send_chat', (msg) => {
+    socket.on('chat', (text) => {
         const p = players[socket.id];
-        if(p && msg.trim().length > 0) {
-            io.emit('chat_message', { type: 'user', name: p.username, text: msg, color: p.color });
-        }
+        if(p) io.emit('msg', { name: p.name, color: p.color, text });
     });
 
-    socket.on('take_seat', (side) => {
-        if (!players[socket.id]) return;
-        if (side === 'left' && !duelState.seatLeft) duelState.seatLeft = socket.id;
-        else if (side === 'right' && !duelState.seatRight) duelState.seatRight = socket.id;
-        resetLocks(); broadcastUpdate();
+    socket.on('seat', (side) => {
+        if (duel.status !== 'open') return;
+        if (side === 'l' && !duel.l) duel.l = socket.id;
+        if (side === 'r' && !duel.r) duel.r = socket.id;
+        resetLocks(); broadcast();
     });
 
-    socket.on('leave_seat', () => {
-        if (duelState.seatLeft === socket.id) duelState.seatLeft = null;
-        if (duelState.seatRight === socket.id) duelState.seatRight = null;
-        resetGame(); broadcastUpdate();
+    socket.on('update_duel', (data) => {
+        if (socket.id !== duel.l && socket.id !== duel.r) return;
+        duel.bet = parseInt(data.bet) || 0;
+        duel.game = data.game;
+        duel.mode = data.mode;
+        resetLocks(); broadcast();
     });
 
-    socket.on('update_settings', (data) => {
-        if (!isSeated(socket.id) || duelState.status !== 'open') return;
-        if (data.bet) duelState.betAmount = parseInt(data.bet);
-        if (data.game) duelState.gameType = data.game;
-        if (data.mode) duelState.matchMode = data.mode;
-        resetLocks(); broadcastUpdate();
-    });
-
-    socket.on('lock_in', async () => {
-        if (!isSeated(socket.id)) return;
+    socket.on('lock', async () => {
         const p = players[socket.id];
-        const user = await User.findById(p.dbId);
-        
-        if (user.balance < duelState.betAmount) {
-            socket.emit('chat_message', { type: 'system', text: 'Insufficient Funds!', color: 'red' });
-            return;
+        if (socket.id === duel.l) duel.lLock = !duel.lLock;
+        if (socket.id === duel.r) duel.rLock = !duel.rLock;
+        broadcast();
+        if (duel.lLock && duel.rLock && duel.bet > 0) startMatch();
+    });
+
+    socket.on('act', () => {
+        if (duel.status !== 'act') return;
+        if (socket.id === duel.l) duel.actions.l = true;
+        if (socket.id === duel.r) duel.actions.r = true;
+        broadcast();
+        if (duel.actions.l && duel.actions.r) resolveRound();
+    });
+
+    socket.on('spec_bet', async (data) => {
+        const p = players[socket.id];
+        if (p.balance >= data.amt && duel.status === 'open') {
+            await User.findByIdAndUpdate(p.dbId, { $inc: { balance: -data.amt } });
+            p.balance -= data.amt;
+            duel.specBets[socket.id] = { side: data.side, amt: data.amt };
+            broadcast();
         }
-
-        if (duelState.seatLeft === socket.id) duelState.leftLocked = !duelState.leftLocked;
-        if (duelState.seatRight === socket.id) duelState.rightLocked = !duelState.rightLocked;
-        broadcastUpdate();
-
-        if (duelState.seatLeft && duelState.seatRight && duelState.leftLocked && duelState.rightLocked && duelState.betAmount > 0) {
-            startMatch();
-        }
     });
 
-    socket.on('perform_action', () => {
-        if (duelState.status !== 'interactive') return;
-        if (socket.id === duelState.seatLeft) duelState.actions.left = true;
-        if (socket.id === duelState.seatRight) duelState.actions.right = true;
-        broadcastUpdate();
-        if (duelState.actions.left && duelState.actions.right) calculateRoundResult();
-    });
-
-    socket.on('disconnect', () => {
-        delete players[socket.id];
-        if (duelState.seatLeft === socket.id || duelState.seatRight === socket.id) resetGame();
-        broadcastUpdate();
-    });
+    socket.on('disconnect', () => { delete players[socket.id]; broadcast(); });
 });
 
-// --- HELPERS ---
-function isSeated(id) { return duelState.seatLeft === id || duelState.seatRight === id; }
-function resetLocks() { duelState.leftLocked=false; duelState.rightLocked=false; duelState.status='open'; duelState.actions={left:null,right:null}; }
-function resetGame() { resetLocks(); duelState.pot=0; duelState.result=null; duelState.winnerId=null; duelState.seatLeft=null; duelState.seatRight=null; duelState.scores={left:0,right:0}; }
-function broadcastUpdate() { io.emit('state_update', { players, duel: duelState }); }
+function resetLocks() { duel.lLock = false; duel.rLock = false; duel.status = 'open'; duel.score = { l: 0, r: 0 }; duel.round = 0; }
+function broadcast() { io.emit('state', { players, duel }); }
 
 async function startMatch() {
-    duelState.status = 'locked';
-    duelState.pot = duelState.betAmount * 2;
-    const p1 = players[duelState.seatLeft];
-    const p2 = players[duelState.seatRight];
-    await User.findByIdAndUpdate(p1.dbId, { $inc: { balance: -duelState.betAmount } });
-    await User.findByIdAndUpdate(p2.dbId, { $inc: { balance: -duelState.betAmount } });
-    p1.balance -= duelState.betAmount;
-    p2.balance -= duelState.betAmount;
-    broadcastUpdate();
-    setTimeout(startRound, 2000);
+    duel.status = 'locked';
+    duel.pot = duel.bet * 2;
+    await User.findByIdAndUpdate(players[duel.l].dbId, { $inc: { balance: -duel.bet } });
+    await User.findByIdAndUpdate(players[duel.r].dbId, { $inc: { balance: -duel.bet } });
+    players[duel.l].balance -= duel.bet;
+    players[duel.r].balance -= duel.bet;
+    broadcast();
+    setTimeout(nextRound, 2000);
 }
 
-function startRound() {
-    duelState.actions = { left: null, right: null };
-    if (duelState.gameType === 'coin') { duelState.status = 'rolling'; calculateRoundResult(); }
-    else { duelState.status = 'interactive'; broadcastUpdate(); }
+function nextRound() {
+    duel.round++;
+    duel.actions = { l: false, r: false };
+    duel.status = duel.game === 'coin' ? 'rolling' : 'act';
+    broadcast();
+    if(duel.game === 'coin') setTimeout(resolveRound, 2000);
 }
 
-function calculateRoundResult() {
-    duelState.status = 'rolling';
-    let isLeftWinner = Math.random() < 0.5;
-    let result = {};
-    if (duelState.gameType === 'coin') result.outcome = isLeftWinner ? 'heads' : 'tails';
+function resolveRound() {
+    duel.status = 'rolling';
+    let winL = Math.random() > 0.5;
+    let res = {};
+    if(duel.game === 'coin') res.val = winL ? 'HEADS' : 'TAILS';
     else {
-        // Dice or Wheel random logic
         const r = () => Math.floor(Math.random()*6)+1;
-        let l=[r(),r(),r()], ri=[r(),r(),r()]; 
-        isLeftWinner = l.reduce((a,b)=>a+b) > ri.reduce((a,b)=>a+b);
-        result = { left: l, right: ri };
+        res.l = [r(), r(), r()]; res.r = [r(), r(), r()];
+        winL = res.l.reduce((a,b)=>a+b) > res.r.reduce((a,b)=>a+b);
     }
-    duelState.result = result;
-    broadcastUpdate();
-
-    setTimeout(async () => {
-        if (isLeftWinner) duelState.scores.left++; else duelState.scores.right++;
-        let target = duelState.matchMode === 'bo5' ? 3 : 2;
-        let winnerId = null;
-        if (duelState.scores.left >= target) winnerId = duelState.seatLeft;
-        if (duelState.scores.right >= target) winnerId = duelState.seatRight;
-
-        if (winnerId) {
-            duelState.status = 'finished';
-            duelState.winnerId = winnerId;
-            const winner = players[winnerId];
-            await User.findByIdAndUpdate(winner.dbId, { $inc: { balance: duelState.pot } });
-            winner.balance += duelState.pot;
-            broadcastUpdate();
-            setTimeout(() => { resetGame(); broadcastUpdate(); }, 6000);
-        } else {
-            duelState.status = 'round_end';
-            broadcastUpdate();
-            setTimeout(startRound, 3000);
-        }
-    }, 4000);
+    duel.res = res; broadcast();
+    setTimeout(() => {
+        if(winL) duel.score.l++; else duel.score.r++;
+        const target = duel.mode.includes('3') ? (duel.mode.startsWith('bo') ? 2 : 3) : (duel.mode.startsWith('bo') ? 3 : 5);
+        if(duel.score.l >= target || duel.score.r >= target) endMatch(duel.score.l >= target ? 'l' : 'r');
+        else nextRound();
+    }, 3000);
 }
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+async function endMatch(side) {
+    duel.status = 'win';
+    const winner = players[duel[side]];
+    await User.findByIdAndUpdate(winner.dbId, { $inc: { balance: duel.pot } });
+    winner.balance += duel.pot;
+    // Spec Payouts (House pays 1.9x)
+    for(let sid in duel.specBets) {
+        if(duel.specBets[sid].side === side && players[sid]) {
+            const pay = Math.floor(duel.specBets[sid].amt * 1.9);
+            await User.findByIdAndUpdate(players[sid].dbId, { $inc: { balance: pay } });
+            players[sid].balance += pay;
+        }
+    }
+    broadcast();
+    setTimeout(() => { duel.l = null; duel.r = null; resetLocks(); broadcast(); }, 5000);
+}
+
+server.listen(process.env.PORT || 3000);
