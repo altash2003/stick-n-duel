@@ -7,37 +7,127 @@ body { background: #202028; color: #fff; font-family: 'VT323', monospace; margin
 .neon-text { color: #ffd700; text-shadow: 2px 2px 0 #000; font-size: 40px; margin: 0 0 20px 0; }
 
 /* LAYOUT */
-.sidebar { width: 240px; background: rgba(0,0,0,0.5); border-right: 2px solid #000; display: flex; flex-direction: column; padding: 10px; }
-.sidebar-head { border-bottom: 2px solid #555; color: #aaa; font-size: 24px; margin-bottom: 10px; }
-.stage { flex: 1; display: flex; flex-direction: column; background-image: radial-gradient(#333 1px, transparent 1px); background-size: 20px 20px; }
+.sidebar { width: 260px; background: rgba(0,0,0,0.4); border-right: 2px solid #000; display: flex; flex-direction: column; padding: 0; }
+.sidebar-head { background: #2F4F4F; color: #fff; font-size: 28px; text-align: center; padding: 10px; border-bottom: 2px solid #000; text-shadow: 2px 2px 0 #000; font-weight: bold; letter-spacing: 1px; }
 
-.top-bar { height: 60px; background: rgba(0,0,0,0.8); border-bottom: 2px solid #fff; display: flex; justify-content: space-around; align-items: center; font-size: 32px; font-weight: bold; text-shadow: 2px 2px 0 #000; }
+.stage { flex: 1; display: flex; flex-direction: column; background-image: radial-gradient(#333 1px, transparent 1px); background-size: 20px 20px; position: relative; }
 
-.game-area { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; }
+.top-bar { height: 50px; background: rgba(0,0,0,0.8); border-bottom: 2px solid #fff; display: flex; justify-content: space-around; align-items: center; font-size: 28px; font-weight: bold; text-shadow: 2px 2px 0 #000; z-index: 10; }
 
-/* SEATS */
-.seats-row { display: flex; width: 80%; justify-content: space-between; margin-top: auto; margin-bottom: 20px; }
-.seat { width: 220px; height: 300px; border: 4px dashed #555; background: rgba(0,0,0,0.5); display: flex; flex-direction: column; align-items: center; padding: 10px; position: relative; }
-.seat.occupied { border-style: solid; border-color: #fff; background: rgba(0,0,0,0.8); }
+.game-area { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+
+/* --- NEW PLAYER LIST STYLE (Like Image) --- */
+#p-list { padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+
+.player-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 40px;
+    padding: 0 8px;
+    background: linear-gradient(to bottom, #00bfff 0%, #007acc 100%); /* Blue glossy look */
+    border: 1px solid #004d80;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.3), 0 2px 0 rgba(0,0,0,0.3);
+    color: white;
+    font-size: 20px;
+    text-shadow: 1px 1px 0 #000;
+    cursor: default;
+}
+
+/* Rank Icon (Left) */
+.p-rank { width: 20px; text-align: center; color: #ccc; font-size: 16px; margin-right: 5px; }
+/* Name */
+.p-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: bold; }
+/* Icon/Avatar (Right) */
+.p-icon { width: 24px; height: 24px; background: rgba(0,0,0,0.2); border-radius: 50%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.p-icon img { width: 100%; height: 100%; }
+
+/* --- SEATS (Fits better) --- */
+.seats-row { display: flex; width: 90%; justify-content: space-between; margin-top: auto; margin-bottom: 30px; }
+.seat { 
+    width: 200px; 
+    height: 260px; /* Slightly smaller to fit */
+    border: 4px dashed #555; 
+    background: rgba(0,0,0,0.6); 
+    display: flex; 
+    flex-direction: column; 
+    align-items: center; 
+    padding: 10px; 
+    position: relative;
+    border-radius: 8px;
+    transition: all 0.2s;
+}
+.seat.occupied { border-style: solid; border-color: #fff; background: rgba(30,30,40,0.9); box-shadow: 0 4px 0 #000; }
 .seat.winner { border-color: #ffd700; box-shadow: 0 0 30px #ffd700; z-index: 10; }
 
-.avatar { width: 80px; height: 80px; image-rendering: pixelated; border: 2px solid #fff; margin-bottom: 10px; }
-.ctrl-panel { margin-top: auto; width: 100%; display: flex; flex-direction: column; gap: 5px; }
+.avatar { width: 70px; height: 70px; image-rendering: pixelated; border: 2px solid #fff; margin-bottom: 5px; background: #000; border-radius: 4px; }
+.ctrl-panel { margin-top: auto; width: 100%; display: flex; flex-direction: column; gap: 4px; }
 
 /* INPUTS & BTNS */
-.pixel-input { background: #000; color: #00ff00; border: 2px solid #555; font-family: 'VT323'; font-size: 20px; padding: 5px; text-align: center; }
-.pixel-btn { background: #3366ff; color: white; border: 4px solid #0000cc; font-family: 'VT323'; font-size: 22px; cursor: pointer; padding: 5px; }
-.pixel-btn:hover { transform: translateY(-2px); }
+.pixel-input { background: #000; color: #00ff00; border: 2px solid #555; font-family: 'VT323'; font-size: 18px; padding: 4px; text-align: center; outline: none; }
+.pixel-btn { background: #3366ff; color: white; border: 2px solid #fff; font-family: 'VT323'; font-size: 20px; cursor: pointer; padding: 4px; text-shadow: 1px 1px 0 #000; box-shadow: 0 4px 0 #0000cc; margin-bottom: 4px; }
+.pixel-btn:hover { transform: translateY(2px); box-shadow: 0 2px 0 #0000cc; }
+.pixel-btn:active { transform: translateY(4px); box-shadow: none; }
 .full-width { width: 100%; }
-.btn-green { background: #00cc00; border-color: #006600; }
+.btn-green { background: #00cc00; box-shadow: 0 4px 0 #006600; }
+.btn-green:hover { box-shadow: 0 2px 0 #006600; }
 
-/* CHAT */
-.chat-area { height: 200px; background: rgba(0,0,0,0.8); border-top: 2px solid #fff; display: flex; flex-direction: column; width: 100%; }
-.chat-msgs { flex: 1; overflow-y: auto; padding: 10px; font-size: 18px; }
-.chat-input { background: #000; border: none; border-top: 1px solid #555; color: #fff; padding: 10px; font-family: 'VT323'; font-size: 18px; outline: none; }
+/* --- NEW CHAT STYLE (Overlay, Smaller) --- */
+.chat-overlay-container {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    width: 350px;
+    height: 180px; /* Not too big */
+    display: flex;
+    flex-direction: column;
+    z-index: 50;
+    pointer-events: none; /* Let clicks pass through empty areas */
+}
+
+.chat-box {
+    background: rgba(0, 0, 0, 0.6); /* Semi-transparent grey */
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.2);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    pointer-events: auto;
+    backdrop-filter: blur(2px);
+    overflow: hidden;
+}
+
+.chat-msgs { 
+    flex: 1; 
+    overflow-y: auto; 
+    padding: 8px 12px; 
+    font-size: 16px; 
+    text-shadow: 1px 1px 0 #000;
+    scrollbar-width: thin;
+}
+.chat-msgs::-webkit-scrollbar { width: 6px; }
+.chat-msgs::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+
+.chat-input-wrapper {
+    padding: 8px;
+    background: rgba(0,0,0,0.3);
+}
+
+.chat-input { 
+    width: 100%;
+    background: rgba(0,0,0,0.5); 
+    border: 1px solid #555; 
+    border-radius: 15px;
+    color: #fff; 
+    padding: 5px 10px; 
+    font-family: 'VT323'; 
+    font-size: 16px; 
+    outline: none; 
+}
+.chat-input:focus { border-color: #00bfff; }
 
 /* VISUALS */
-.visual-center { position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 400px; }
+.visual-center { position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); text-align: center; width: 400px; }
 .vis-box { text-shadow: 2px 2px 0 #000; }
 .action-btn { background: #ff00ff; color: white; border: 4px solid #fff; font-size: 30px; font-family: 'VT323'; cursor: pointer; padding: 10px 30px; display: none; margin: 20px auto; animation: pop 0.5s infinite alternate; }
 @keyframes pop { to { transform: scale(1.1); } }
@@ -48,4 +138,4 @@ body { background: #202028; color: #fff; font-family: 'VT323', monospace; margin
 .back { transform: rotateY(180deg); }
 
 /* SPECTATOR */
-.spec-panel { position: absolute; bottom: 240px; background: #000; border: 2px solid #fff; padding: 10px; gap: 10px; align-items: center; z-index: 20; }
+.spec-panel { position: absolute; bottom: 20px; right: 20px; background: #000; border: 2px solid #fff; padding: 10px; gap: 10px; align-items: center; z-index: 20; border-radius: 8px; }
