@@ -93,13 +93,37 @@ function showError(msg) {
 // --- GAME LOGIC (Socket Events) ---
 
 socket.on('state_update', ({players, duel}) => {
-    // 1. UPDATE PLAYERS LIST
+    // 1. UPDATE PLAYERS LIST (NEW GLOSSY STYLE)
     const pList = document.getElementById('p-list');
-    pList.innerHTML = Object.values(players).map(p => 
-        `<div style="color:${p.color}; border-bottom:1px solid #333; padding:4px;">
-            ${p.username} <span style="float:right; color:#ffd700">$${p.balance}</span>
-        </div>`
-    ).join('');
+    
+    // Sort players by balance (High to Low) to create a ranking effect
+    const sortedPlayers = Object.values(players).sort((a,b) => b.balance - a.balance);
+
+    pList.innerHTML = sortedPlayers.map((p, index) => {
+        // Visual logic to mimic the screenshot ranks
+        let rankChar = "^"; 
+        let barStyle = "background: linear-gradient(to bottom, #00bfff 0%, #007acc 100%); border-color: #004d80;"; // Blue (Default)
+
+        if(index === 0) { 
+            // Top Player (Red/Pink like 'Nagi')
+            barStyle = "background: linear-gradient(to bottom, #ff3333 0%, #cc0000 100%); border-color: #800000;";
+            rankChar = "=";
+        } else if (index === 1) {
+            // 2nd Place (Silver/Grey)
+            barStyle = "background: linear-gradient(to bottom, #888 0%, #555 100%); border-color: #333;";
+            rankChar = "»";
+        }
+
+        return `
+        <div class="player-card" style="${barStyle}">
+            <div class="p-rank">${rankChar}</div>
+            <div class="p-name">${p.username} <span style="font-size:14px; opacity:0.8;">($${p.balance})</span></div>
+            <div class="p-icon">
+                <img src="${p.avatar}" alt="av">
+            </div>
+        </div>
+        `;
+    }).join('');
 
     // 2. UPDATE TOP BAR
     document.getElementById('sc-l').innerText = duel.scores.left;
@@ -159,7 +183,7 @@ function renderSeat(side, id, locked, players, duel) {
     el.className = `seat ${id ? 'occupied' : ''} ${duel.winnerId === id ? 'winner' : ''}`;
     
     if(!id) {
-        el.innerHTML = `<button class="pixel-btn" onclick="socket.emit('take_seat', '${side}')">SIT HERE</button>`;
+        el.innerHTML = `<button class="pixel-btn" onclick="socket.emit('take_seat', '${side}')" style="margin-top:auto; width:100%;">SIT HERE</button>`;
     } else {
         const p = players[id];
         const isMe = p.username === myUser;
@@ -167,11 +191,13 @@ function renderSeat(side, id, locked, players, duel) {
         let controls = '';
         if(isMe) {
             controls = `
-            <div class="ctrl-panel" style="display:flex;">
-                <input id="bet" class="pixel-input" placeholder="BET" onchange="upd()">
-                <select id="game" class="pixel-input" onchange="upd()"><option value="coin">Coin</option><option value="dice">Dice</option><option value="wheel">Wheel</option></select>
-                <button class="pixel-btn ${locked?'btn-green':''}" onclick="socket.emit('lock_in')">${locked?'LOCKED':'LOCK'}</button>
-                <button class="pixel-btn" style="background:#cc0000;" onclick="socket.emit('leave_seat')">LEAVE</button>
+            <div class="ctrl-panel">
+                <input id="bet" class="pixel-input full-width" placeholder="BET" onchange="upd()">
+                <select id="game" class="pixel-input full-width" onchange="upd()"><option value="coin">Coin</option><option value="dice">Dice</option><option value="wheel">Wheel</option></select>
+                <div style="display:flex; gap:5px;">
+                    <button class="pixel-btn ${locked?'btn-green':''} full-width" onclick="socket.emit('lock_in')">${locked?'LOCKED':'LOCK'}</button>
+                    <button class="pixel-btn full-width" style="background:#cc0000; border-color:#660000;" onclick="socket.emit('leave_seat')">LEAVE</button>
+                </div>
             </div>`;
         } else {
             // View for others
@@ -179,9 +205,9 @@ function renderSeat(side, id, locked, players, duel) {
         }
 
         el.innerHTML = `
+            <div style="font-size:24px; color:${p.color}; text-shadow:1px 1px 0 #000; margin-bottom:5px;">${p.username}</div>
             <img src="${p.avatar}" class="avatar" style="border-color:${p.color}">
-            <div style="font-size:24px; color:${p.color}">${p.username}</div>
-            <div style="color:#ffd700">$${p.balance}</div>
+            <div style="color:#ffd700; margin-bottom:10px;">$${p.balance}</div>
             ${controls}
         `;
         
@@ -201,10 +227,12 @@ function upd() {
 }
 
 function doAction() { socket.emit('perform_action'); }
+
 function spec(side) {
     const amt = document.getElementById('sp-amt').value;
     if(amt>0) socket.emit('place_spectator_bet', {amount:amt, side});
 }
+
 function sendChat(e) {
     if(e.key === 'Enter') { 
         socket.emit('send_chat', e.target.value); 
@@ -213,7 +241,19 @@ function sendChat(e) {
 }
 
 socket.on('chat_message', msg => {
+    const container = document.getElementById('chat-msgs');
     const d = document.createElement('div');
-    d.innerHTML = `<span style="color:${msg.color}">${msg.name||'SYS'}:</span> ${msg.text}`;
-    document.getElementById('chat-msgs').appendChild(d);
+    
+    // New Chat Style matching the image (Name: Message)
+    if(msg.type === 'system') {
+        d.innerHTML = `<span style="color:#ffd700;">[SYS] ${msg.text}</span>`;
+    } else {
+        d.innerHTML = `<span style="color:${msg.color}; font-weight:bold;">${msg.name}:</span> <span style="color:#fff;">${msg.text}</span>`;
+    }
+    
+    d.style.marginBottom = "4px";
+    container.appendChild(d);
+    
+    // Auto scroll to bottom
+    container.scrollTop = container.scrollHeight;
 });
